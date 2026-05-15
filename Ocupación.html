@@ -1,0 +1,541 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dashboard Regionfrom pathlib import Path
+import base64, subprocess, os, sys
+
+pdf_path = Path("/mnt/data/Nuevo mapa de regiones A3_260514_084935.pdf")
+out_dir = Path("/mnt/data/dashboard_neuquen_export")
+out_dir.mkdir(exist_ok=True)
+png_path = out_dir / "mapa_regionalizacion_neuquen.png"
+
+# Convert PDF page to PNG
+converted = False
+try:
+    import fitz  # PyMuPDF
+    doc = fitz.open(str(pdf_path))
+    page = doc[0]
+    pix = page.get_pixmap(matrix=fitz.Matrix(2.2, 2.2), alpha=False)
+    pix.save(str(png_path))
+    converted = True
+except Exception:
+    pass
+
+if not converted:
+    # fallback to poppler if available
+    try:
+        subprocess.run(
+            ["pdftoppm", "-png", "-r", "180", "-singlefile", str(pdf_path), str(out_dir / "mapa_regionalizacion_neuquen")],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        converted = True
+    except Exception as e:
+        raise RuntimeError("No se pudo convertir el PDF del mapa a PNG.") from e
+
+img_b64 = base64.b64encode(png_path.read_bytes()).decode("ascii")
+
+html = f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Dashboard Regionalizado del Turismo - Neuquén</title>
+  <style>
+    :root {{
+      --bg:#f3f7f6;
+      --ink:#073746;
+      --muted:#667085;
+      --card:#ffffff;
+      --line:#d8e3e1;
+      --green:#62bf6a;
+      --shadow:0 14px 34px rgba(7,55,70,.12);
+    }}
+    * {{ box-sizing:border-box; }}
+    body {{
+      margin:0;
+      font-family: Arial, Helvetica, sans-serif;
+      background:var(--bg);
+      color:var(--ink);
+    }}
+    .wrap {{ max-width:1440px; margin:0 auto; padding:24px; }}
+    .hero {{
+      background:linear-gradient(135deg,#073746 0%,#0d5d66 72%,#5dbb63 100%);
+      color:white;
+      border-radius:28px;
+      padding:34px;
+      box-shadow:var(--shadow);
+      display:grid;
+      grid-template-columns:1.35fr .65fr;
+      gap:22px;
+      align-items:end;
+    }}
+    .eyebrow {{ letter-spacing:.24em; text-transform:uppercase; color:#dff3e6; font-size:13px; font-weight:700; }}
+    h1 {{ font-size:clamp(34px,5vw,60px); margin:12px 0 10px; line-height:1; }}
+    .hero p {{ margin:0; max-width:900px; line-height:1.65; color:#ecfff2; font-size:17px; }}
+    .source {{ font-size:13px; color:#e6fff0; text-align:right; line-height:1.5; }}
+    .toolbar {{
+      margin:22px 0;
+      background:white;
+      border:1px solid var(--line);
+      border-radius:22px;
+      padding:16px;
+      display:flex;
+      flex-wrap:wrap;
+      gap:14px;
+      align-items:center;
+      justify-content:space-between;
+      box-shadow:0 8px 22px rgba(7,55,70,.07);
+    }}
+    .toolbar label {{ font-weight:700; }}
+    select {{
+      border:1px solid var(--line);
+      border-radius:14px;
+      padding:10px 14px;
+      background:#fbfefd;
+      color:var(--ink);
+      font-size:15px;
+    }}
+    .legend {{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; font-size:13px; color:#52646b; }}
+    .legend span {{ display:inline-flex; align-items:center; gap:6px; }}
+    .sw {{ width:18px; height:10px; border-radius:99px; display:inline-block; }}
+    .kpis {{ display:grid; grid-template-columns:repeat(5,1fr); gap:16px; margin-bottom:22px; }}
+    .kpi {{ background:var(--card); border:1px solid var(--line); border-radius:24px; padding:20px; box-shadow:0 8px 22px rgba(7,55,70,.08); }}
+    .kpi span {{ display:block; color:var(--muted); font-size:13px; margin-bottom:8px; }}
+    .kpi strong {{ font-size:38px; line-height:1; }}
+    .grid {{ display:grid; grid-template-columns:1.05fr .95fr; gap:22px; align-items:start; }}
+    .card {{ background:var(--card); border:1px solid var(--line); border-radius:28px; padding:22px; box-shadow:var(--shadow); margin-bottom:22px; }}
+    h2 {{ margin:0 0 6px; font-size:30px; }}
+    .sub {{ color:var(--muted); margin:0 0 18px; line-height:1.5; }}
+    .map-shell {{ position:relative; border:1px solid var(--line); border-radius:22px; overflow:hidden; background:#fff; }}
+    .map-img {{ display:block; width:100%; height:auto; }}
+    .hotspot {{
+      position:absolute; border:3px solid transparent; border-radius:18px; cursor:pointer;
+      transition:.15s ease; background:rgba(255,255,255,0);
+    }}
+    .hotspot:hover, .hotspot.active {{
+      border-color:#073746;
+      background:rgba(255,255,255,.16);
+      box-shadow:0 0 0 5px rgba(98,191,106,.25);
+    }}
+    .occ-label {{
+      position:absolute;
+      transform:translate(-50%,-50%);
+      border:2px solid rgba(255,255,255,.94);
+      border-radius:999px;
+      padding:6px 10px;
+      font-size:13px;
+      font-weight:800;
+      color:#073746;
+      background:white;
+      box-shadow:0 6px 14px rgba(0,0,0,.2);
+      pointer-events:none;
+      white-space:nowrap;
+    }}
+    .occ-label.sd {{ color:#667085; }}
+    .tip {{
+      position:absolute; pointer-events:none; transform:translate(-50%,-118%);
+      background:#073746; color:#fff; padding:9px 11px; border-radius:12px;
+      font-size:12px; white-space:nowrap; opacity:0; transition:.12s ease; z-index:10;
+    }}
+    .tip.show {{ opacity:1; }}
+    .panel {{
+      border:2px solid #6cc56e; background:#f7fff8; border-radius:24px; padding:18px; margin-bottom:18px;
+    }}
+    .region-head {{ display:flex; align-items:center; gap:10px; margin-bottom:12px; }}
+    .dot {{ width:18px; height:18px; border-radius:50%; border:1px solid rgba(0,0,0,.18); flex:none; }}
+    .region-head h3 {{ margin:0; font-size:23px; }}
+    .panel-grid {{ display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin:14px 0; }}
+    .panel-box {{ background:white; border:1px solid var(--line); border-radius:16px; padding:11px; text-align:center; }}
+    .panel-box span {{ display:block; color:var(--muted); font-size:12px; margin-bottom:5px; }}
+    .panel-box b {{ font-size:22px; }}
+    .small {{ font-size:13px; line-height:1.45; color:#52646b; margin:6px 0 0; }}
+    .region-list {{ display:grid; gap:12px; }}
+    .region-card {{
+      border:1px solid var(--line); background:#fbfefd; border-radius:20px; padding:15px; cursor:pointer;
+      transition:.15s ease;
+    }}
+    .region-card:hover, .region-card.active {{ transform:translateY(-1px); box-shadow:0 8px 20px rgba(7,55,70,.10); border-color:#7ccf83; }}
+    .region-card h3 {{ margin:0; font-size:18px; }}
+    .nums {{ display:grid; grid-template-columns:repeat(5,1fr); gap:7px; margin-bottom:10px; }}
+    .num {{ background:#fff; border:1px solid var(--line); border-radius:13px; padding:8px; text-align:center; }}
+    .num span {{ display:block; color:var(--muted); font-size:10.5px; margin-bottom:4px; }}
+    .num b {{ font-size:16px; }}
+    .bar {{ height:12px; border-radius:999px; background:#e7efed; overflow:hidden; margin:10px 0; }}
+    .fill {{ height:100%; border-radius:999px; }}
+    .occbar {{ height:14px; border-radius:999px; background:#e7efed; overflow:hidden; margin-top:8px; }}
+    .occfill {{ height:100%; border-radius:999px; background:#31583a; }}
+    .linechart {{
+      width:100%;
+      height:230px;
+      border:1px solid var(--line);
+      border-radius:20px;
+      background:#fbfefd;
+      padding:10px;
+    }}
+    .activities {{ display:grid; gap:13px; }}
+    .act-top {{ display:flex; justify-content:space-between; gap:12px; font-size:14px; margin-bottom:5px; }}
+    .actbar {{ height:17px; background:#e7efed; border-radius:999px; overflow:hidden; }}
+    .actfill {{ height:100%; background:#31583a; border-radius:999px; }}
+    .ranking {{ display:grid; gap:10px; }}
+    .rank-row {{ display:grid; grid-template-columns:34px 1fr 64px; gap:10px; align-items:center; background:#fbfefd; border:1px solid var(--line); border-radius:16px; padding:10px; }}
+    .rank-pos {{ background:#073746; color:white; width:28px; height:28px; border-radius:999px; display:grid; place-items:center; font-size:13px; font-weight:700; }}
+    .notes {{ display:grid; grid-template-columns:repeat(2,1fr); gap:14px; }}
+    .note {{ border:1px solid var(--line); border-radius:18px; padding:16px; background:#fbfefd; line-height:1.55; color:#3e555d; }}
+    .note h3 {{ margin:0 0 8px; color:var(--ink); }}
+    footer {{ color:var(--muted); text-align:center; padding:16px 0 6px; font-size:13px; }}
+    @media(max-width:1180px) {{ .hero,.grid {{ grid-template-columns:1fr; }} .source {{ text-align:left; }} .kpis {{ grid-template-columns:repeat(2,1fr); }} }}
+    @media(max-width:740px) {{
+      .wrap {{ padding:14px; }}
+      .kpis,.panel-grid,.nums,.notes {{ grid-template-columns:1fr; }}
+      .kpi strong {{ font-size:34px; }}
+      .occ-label {{ font-size:11px; padding:4px 7px; }}
+      .rank-row {{ grid-template-columns:30px 1fr 50px; }}
+    }}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="hero">
+      <div>
+        <div class="eyebrow">Observatorio Turístico · Neuquén</div>
+        <h1>Dashboard Regionalizado del Turismo</h1>
+        <p>Oferta turística y ocupación por región sobre la base del Plan Provincial de Regionalización. Mapa con colorimetría institucional original y capa dinámica de ocupación.</p>
+      </div>
+      <div class="source">Mapa base: Plan Provincial de Regionalización<br/>Provincia del Neuquén</div>
+    </header>
+
+    <section class="toolbar">
+      <div>
+        <label for="monthSelect">Período: </label>
+        <select id="monthSelect">
+          <option value="ene2026">Enero 2026</option>
+          <option value="feb2026">Febrero 2026</option>
+        </select>
+      </div>
+      <div class="legend">
+        <b>Ocupación:</b>
+        <span><i class="sw" style="background:#2e7d32"></i> Alta +75%</span>
+        <span><i class="sw" style="background:#66a83f"></i> Media alta 60–75%</span>
+        <span><i class="sw" style="background:#f2c94c"></i> Media 45–60%</span>
+        <span><i class="sw" style="background:#d96b4c"></i> Baja &lt;45%</span>
+      </div>
+    </section>
+
+    <section class="kpis">
+      <div class="kpi"><span>Establecimientos</span><strong>1.020</strong></div>
+      <div class="kpi"><span>Habitaciones</span><strong>8.931</strong></div>
+      <div class="kpi"><span>Plazas / camas</span><strong>26.851</strong></div>
+      <div class="kpi"><span>Prestadores actividades</span><strong>325</strong></div>
+      <div class="kpi"><span>Ocupación promedio</span><strong id="avgOcc">--</strong></div>
+    </section>
+
+    <main class="grid">
+      <section class="card">
+        <h2>Mapa regional interactivo</h2>
+        <p class="sub">Hacé click sobre una región o una tarjeta. La ocupación se muestra con etiquetas y borde dinámico, manteniendo los colores oficiales del mapa.</p>
+        <div class="map-shell" id="mapShell">
+          <img class="map-img" src="data:image/png;base64,{img_b64}" alt="Mapa de regionalización de Neuquén"/>
+          <button class="hotspot" data-region="alto" style="left:34%;top:21%;width:19%;height:25%;" title="Región Alto Neuquén"></button>
+          <button class="hotspot" data-region="vaca" style="left:56%;top:24%;width:20%;height:22%;" title="Región Vaca Muerta"></button>
+          <button class="hotspot" data-region="pehuen" style="left:31%;top:47%;width:27%;height:20%;" title="Región del Pehuén"></button>
+          <button class="hotspot" data-region="comarca" style="left:60%;top:49%;width:10%;height:9%;" title="Región de la Comarca"></button>
+          <button class="hotspot" data-region="confluencia" style="left:70%;top:49%;width:12%;height:9%;" title="Región Confluencia"></button>
+          <button class="hotspot" data-region="limay" style="left:49%;top:61%;width:22%;height:18%;" title="Región del Limay"></button>
+          <button class="hotspot" data-region="lagos" style="left:24%;top:63%;width:23%;height:22%;" title="Región de los Lagos del Sur"></button>
+
+          <div class="occ-label" data-label="alto" style="left:43%;top:34%"></div>
+          <div class="occ-label" data-label="vaca" style="left:66%;top:35%"></div>
+          <div class="occ-label" data-label="pehuen" style="left:45%;top:58%"></div>
+          <div class="occ-label" data-label="comarca" style="left:65%;top:55%"></div>
+          <div class="occ-label" data-label="confluencia" style="left:76%;top:55%"></div>
+          <div class="occ-label" data-label="limay" style="left:60%;top:70%"></div>
+          <div class="occ-label" data-label="lagos" style="left:35%;top:75%"></div>
+
+          <div class="tip" id="tip"></div>
+        </div>
+      </section>
+
+      <aside class="card">
+        <h2>Detalle regional</h2>
+        <p class="sub">Indicadores de la región seleccionada.</p>
+        <div class="panel" id="detail"></div>
+        <div class="region-list" id="regionList"></div>
+      </aside>
+    </main>
+
+    <section class="grid">
+      <div class="card">
+        <h2>Evolución de ocupación</h2>
+        <p class="sub">Serie inicial Enero–Febrero 2026. Se puede ampliar con nuevos meses.</p>
+        <svg class="linechart" id="lineChart" viewBox="0 0 600 230"></svg>
+      </div>
+
+      <div class="card">
+        <h2>Ranking regional</h2>
+        <p class="sub">Ordenado por ocupación del período seleccionado.</p>
+        <div class="ranking" id="ranking"></div>
+      </div>
+    </section>
+
+    <section class="grid">
+      <div class="card">
+        <h2>Prestadores por actividad</h2>
+        <p class="sub">Distribución provincial de 325 prestadores habilitados.</p>
+        <div class="activities" id="activities"></div>
+      </div>
+
+      <div class="card">
+        <h2>Lectura territorial</h2>
+        <div class="notes">
+          <div class="note"><h3>Oferta + ocupación</h3>El tablero permite comparar capacidad instalada con uso efectivo de la oferta turística.</div>
+          <div class="note"><h3>Lagos del Sur</h3>Concentra la mayor infraestructura y sostiene los niveles de ocupación más altos en verano.</div>
+          <div class="note"><h3>Confluencia</h3>Presenta una dinámica diferente, más urbana y corporativa, con mejora de enero a febrero.</div>
+          <div class="note"><h3>Dato temporal</h3>Con más meses se puede construir estacionalidad, tendencia y variación interanual.</div>
+        </div>
+      </div>
+    </section>
+
+    <footer>Dashboard elaborado con datos del Observatorio Turístico y mapa del Plan Provincial de Regionalización.</footer>
+  </div>
+
+<script>
+const regiones = {{
+  alto: {{
+    nombre:'Región Alto Neuquén', color:'#c1357d',
+    establecimientos:101, habitaciones:608, plazas:1503, prestadores:46,
+    localidades:'Chos Malal, Andacollo, Loncopué, El Cholar, El Huecú, Huinganco, Las Ovejas, Los Miches, Taquimilán, Tricao Malal, Caviahue-Copahue, Chorriaca, Coyuco Cochico, Guañacos, Manzano Amargo, Varvarco-Invernada Vieja, Villa del Nahueve, Villa Curi Leuvú',
+    perfil:'Ecoturismo, pesca, termalismo, naturaleza y montaña.',
+    ocupacion: {{ ene2026:55.8, feb2026:55.3 }}
+  }},
+  vaca: {{
+    nombre:'Región Vaca Muerta', color:'#bf7d24',
+    establecimientos:19, habitaciones:590, plazas:1288, prestadores:17,
+    localidades:'Rincón de los Sauces, San Patricio del Chañar, Añelo, Buta Ranquil, Barrancas, Aguada San Roque, Los Chihuidos, Octavio Pico',
+    perfil:'Servicios petroleros, alojamiento corporativo, vitivinicultura y turismo de paso.',
+    ocupacion: {{ ene2026:null, feb2026:null }}
+  }},
+  pehuen: {{
+    nombre:'Región del Pehuén', color:'#f5df4d',
+    establecimientos:267, habitaciones:1340, plazas:4774, prestadores:54,
+    localidades:'Zapala, Aluminé, Las Lajas, Mariano Moreno, Villa Pehuenia, Bajada del Agrio, Las Coloradas, Covunco Abajo, Los Catutos, Quili Malal, Ramón Castro, Villa del Puente Picún Leufú',
+    perfil:'Naturaleza, nieve, gastronomía, montaña y turismo lacustre.',
+    ocupacion: {{ ene2026:66.1, feb2026:59.2 }}
+  }},
+  comarca: {{
+    nombre:'Región de la Comarca', color:'#8b8d87',
+    establecimientos:10, habitaciones:134, plazas:295, prestadores:5,
+    localidades:'Cutral Có, Plaza Huincul, Sauzal Bonito',
+    perfil:'Turismo de servicios, paso y soporte territorial.',
+    ocupacion: {{ ene2026:null, feb2026:null }}
+  }},
+  confluencia: {{
+    nombre:'Región Confluencia', color:'#e45e62',
+    establecimientos:104, habitaciones:2099, plazas:5127, prestadores:51,
+    localidades:'Centenario, Neuquén, Plottier, Senillosa, Vista Alegre, Villa El Chocón',
+    perfil:'Turismo urbano, corporativo, eventos, servicios y conectividad.',
+    ocupacion: {{ ene2026:55.1, feb2026:61.6 }}
+  }},
+  limay: {{
+    nombre:'Región del Limay', color:'#10aeb2',
+    establecimientos:37, habitaciones:107, plazas:376, prestadores:10,
+    localidades:'Picún Leufú, Piedra del Águila, El Sauce, Paso Aguerre, Santo Tomás',
+    perfil:'Pesca, embalses, turismo de paso y naturaleza.',
+    ocupacion: {{ ene2026:66.4, feb2026:52.6 }}
+  }},
+  lagos: {{
+    nombre:'Región de los Lagos del Sur', color:'#6da9cd',
+    establecimientos:482, habitaciones:4001, plazas:13130, prestadores:156,
+    localidades:'Junín de los Andes, San Martín de los Andes, Villa La Angostura, Villa Traful, Pilo Lil',
+    perfil:'Principal corredor turístico provincial: lagos, nieve, montaña, pesca y naturaleza.',
+    ocupacion: {{ ene2026:80.9, feb2026:76.4 }}
+  }}
+}};
+
+const periodos = {{
+  ene2026:'Enero 2026',
+  feb2026:'Febrero 2026'
+}};
+
+const actividades = [
+  ['Pesca deportiva',192], ['Montañismo',49], ['Guías de sitio',12], ['Rafting',12],
+  ['4x4',11], ['Kayak',8], ['Senderismo',8], ['Mountain bike',7], ['Cabalgatas',6],
+  ['Otras actividades',20]
+];
+
+const fmt = n => n.toLocaleString('es-AR');
+const occFmt = v => v === null || v === undefined ? 's/d' : v.toFixed(1).replace('.', ',') + '%';
+let selected = 'lagos';
+let periodo = 'ene2026';
+
+function occColor(v) {{
+  if (v === null || v === undefined) return '#9aa3ad';
+  if (v >= 75) return '#2e7d32';
+  if (v >= 60) return '#66a83f';
+  if (v >= 45) return '#f2c94c';
+  return '#d96b4c';
+}}
+
+function renderDetail(key) {{
+  selected = key;
+  const r = regiones[key];
+  const occ = r.ocupacion[periodo];
+  const prev = periodo === 'feb2026' ? r.ocupacion.ene2026 : null;
+  const delta = prev !== null && occ !== null ? (occ - prev) : null;
+  const deltaTxt = delta === null ? 's/d' : (delta >= 0 ? '+' : '') + delta.toFixed(1).replace('.', ',') + ' pts';
+
+  document.getElementById('detail').innerHTML = `
+    <div class="region-head"><span class="dot" style="background:${{r.color}}"></span><h3>${{r.nombre}}</h3></div>
+    <div class="panel-grid">
+      <div class="panel-box"><span>Ocupación</span><b style="color:${{occColor(occ)}}">${{occFmt(occ)}}</b></div>
+      <div class="panel-box"><span>Var. mensual</span><b>${{deltaTxt}}</b></div>
+      <div class="panel-box"><span>Est.</span><b>${{fmt(r.establecimientos)}}</b></div>
+      <div class="panel-box"><span>Hab.</span><b>${{fmt(r.habitaciones)}}</b></div>
+      <div class="panel-box"><span>Plazas</span><b>${{fmt(r.plazas)}}</b></div>
+    </div>
+    <p class="small"><b>Prestadores:</b> ${{fmt(r.prestadores)}}</p>
+    <p class="small"><b>Localidades:</b> ${{r.localidades}}</p>
+    <p class="small"><b>Perfil turístico:</b> ${{r.perfil}}</p>
+    <div class="occbar"><div class="occfill" style="width:${{occ || 0}}%;background:${{occColor(occ)}}"></div></div>
+  `;
+  document.querySelectorAll('[data-region]').forEach(el => el.classList.toggle('active', el.dataset.region === key));
+  renderLineChart(key);
+}}
+
+function renderRegionList() {{
+  const list = document.getElementById('regionList');
+  list.innerHTML = Object.entries(regiones).map(([key,r]) => {{
+    const occ = r.ocupacion[periodo];
+    return `
+      <div class="region-card" data-region="${{key}}">
+        <div class="region-head"><span class="dot" style="background:${{r.color}}"></span><h3>${{r.nombre}}</h3></div>
+        <div class="nums">
+          <div class="num"><span>Ocup.</span><b style="color:${{occColor(occ)}}">${{occFmt(occ)}}</b></div>
+          <div class="num"><span>Est.</span><b>${{fmt(r.establecimientos)}}</b></div>
+          <div class="num"><span>Hab.</span><b>${{fmt(r.habitaciones)}}</b></div>
+          <div class="num"><span>Plazas</span><b>${{fmt(r.plazas)}}</b></div>
+          <div class="num"><span>Prest.</span><b>${{fmt(r.prestadores)}}</b></div>
+        </div>
+        <div class="occbar"><div class="occfill" style="width:${{occ || 0}}%;background:${{occColor(occ)}}"></div></div>
+      </div>
+    `;
+  }}).join('');
+  document.querySelectorAll('.region-card').forEach(card => {{
+    card.classList.toggle('active', card.dataset.region === selected);
+    card.addEventListener('click', () => renderDetail(card.dataset.region));
+  }});
+}}
+
+function updateMapLabels() {{
+  Object.entries(regiones).forEach(([key,r]) => {{
+    const occ = r.ocupacion[periodo];
+    const label = document.querySelector(`[data-label="${{key}}"]`);
+    label.textContent = occFmt(occ);
+    label.style.borderColor = occColor(occ);
+    label.classList.toggle('sd', occ === null || occ === undefined);
+  }});
+}}
+
+function renderRanking() {{
+  const rows = Object.entries(regiones)
+    .map(([key,r]) => [key, r, r.ocupacion[periodo]])
+    .filter(x => x[2] !== null && x[2] !== undefined)
+    .sort((a,b) => b[2] - a[2]);
+
+  document.getElementById('ranking').innerHTML = rows.map(([key,r,occ], i) => `
+    <div class="rank-row" data-region="${{key}}">
+      <div class="rank-pos">${{i+1}}</div>
+      <div><b>${{r.nombre}}</b><div class="occbar"><div class="occfill" style="width:${{occ}}%;background:${{occColor(occ)}}"></div></div></div>
+      <b>${{occFmt(occ)}}</b>
+    </div>
+  `).join('');
+  document.querySelectorAll('.rank-row').forEach(row => row.addEventListener('click', () => renderDetail(row.dataset.region)));
+}}
+
+function renderAvg() {{
+  const vals = Object.values(regiones).map(r => r.ocupacion[periodo]).filter(v => v !== null && v !== undefined);
+  const avg = vals.reduce((a,b)=>a+b,0)/vals.length;
+  document.getElementById('avgOcc').textContent = occFmt(avg);
+}}
+
+function renderActivities() {{
+  document.getElementById('activities').innerHTML = actividades.map(([name,value]) => `
+    <div>
+      <div class="act-top"><b>${{name}}</b><span>${{value}}</span></div>
+      <div class="actbar"><div class="actfill" style="width:${{(value/192)*100}}%"></div></div>
+    </div>
+  `).join('');
+}}
+
+function renderLineChart(key) {{
+  const r = regiones[key];
+  const svg = document.getElementById('lineChart');
+  const months = ['ene2026','feb2026'];
+  const pts = months.map((m,i) => {{
+    const v = r.ocupacion[m];
+    const x = 90 + i*380;
+    const y = v === null ? null : 190 - (v/100)*150;
+    return {{m, v, x, y}};
+  }});
+
+  const valid = pts.filter(p => p.y !== null);
+  const line = valid.length > 1 ? `<polyline points="${{valid.map(p => p.x+','+p.y).join(' ')}}" fill="none" stroke="${{r.color}}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>` : '';
+
+  svg.innerHTML = `
+    <line x1="60" y1="190" x2="540" y2="190" stroke="#d8e3e1"/>
+    <line x1="60" y1="40" x2="60" y2="190" stroke="#d8e3e1"/>
+    <text x="60" y="25" font-size="13" fill="#667085">100%</text>
+    <text x="30" y="115" font-size="13" fill="#667085">50%</text>
+    <text x="38" y="195" font-size="13" fill="#667085">0%</text>
+    ${{line}}
+    ${{pts.map(p => p.y === null ? `
+      <text x="${{p.x}}" y="115" text-anchor="middle" font-size="13" fill="#667085">s/d</text>
+    ` : `
+      <circle cx="${{p.x}}" cy="${{p.y}}" r="7" fill="${{r.color}}" stroke="#073746" stroke-width="2"/>
+      <text x="${{p.x}}" y="${{p.y-16}}" text-anchor="middle" font-size="14" font-weight="700" fill="#073746">${{occFmt(p.v)}}</text>
+    `).join('')}}
+    <text x="90" y="215" text-anchor="middle" font-size="13" fill="#667085">Ene 2026</text>
+    <text x="470" y="215" text-anchor="middle" font-size="13" fill="#667085">Feb 2026</text>
+    <text x="300" y="25" text-anchor="middle" font-size="15" font-weight="700" fill="#073746">${{r.nombre}}</text>
+  `;
+}}
+
+function refreshAll() {{
+  renderAvg();
+  renderRegionList();
+  updateMapLabels();
+  renderRanking();
+  renderDetail(selected);
+}}
+
+const tip = document.getElementById('tip');
+document.querySelectorAll('.hotspot').forEach(h => {{
+  h.addEventListener('click', () => renderDetail(h.dataset.region));
+  h.addEventListener('mouseenter', () => {{
+    const r = regiones[h.dataset.region];
+    const occ = r.ocupacion[periodo];
+    tip.textContent = `${{r.nombre}} · Ocupación: ${{occFmt(occ)}}`;
+    tip.classList.add('show');
+  }});
+  h.addEventListener('mousemove', e => {{
+    const shell = document.getElementById('mapShell').getBoundingClientRect();
+    tip.style.left = (e.clientX - shell.left) + 'px';
+    tip.style.top = (e.clientY - shell.top) + 'px';
+  }});
+  h.addEventListener('mouseleave', () => tip.classList.remove('show'));
+}});
+
+document.getElementById('monthSelect').addEventListener('change', e => {{
+  periodo = e.target.value;
+  refreshAll();
+}});
+
+renderActivities();
+refreshAll();
+</script>
+</body>
+</html>
+"""
+
+html_path = Path("/mnt/data/index.html")
+html_path.write_text(html, encoding="utf-8")
+print("Archivo generado:", html_path)
+print("Tamaño:", html_path.stat().st_size, "bytes")
